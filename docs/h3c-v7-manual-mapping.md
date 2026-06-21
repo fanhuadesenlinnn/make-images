@@ -6,12 +6,13 @@
 
 ```bash
 sudo bash scripts/01-install-base.sh
-sudo bash scripts/02-configure-virtio-initramfs.sh
+sudo bash scripts/02-configure-level3-basic.sh
+sudo bash scripts/03-configure-virtio-initramfs.sh
 sudo reboot
 
-sudo bash scripts/03-clean-old-kernels.sh
-sudo bash scripts/04-configure-h3c-cloud-init.sh
-sudo bash scripts/05-seal-image.sh
+sudo bash scripts/04-clean-old-kernels.sh
+sudo bash scripts/05-configure-h3c-cloud-init.sh
+sudo bash scripts/06-seal-image.sh
 sudo shutdown -h now
 ```
 
@@ -19,7 +20,7 @@ sudo shutdown -h now
 
 ### 修改 cloud-init 配置文件
 
-由 `scripts/04-configure-h3c-cloud-init.sh` 完成。
+由 `scripts/05-configure-h3c-cloud-init.sh` 完成。
 
 脚本会修补主配置文件，并额外写入 drop-in 覆盖配置：
 
@@ -43,7 +44,7 @@ datasource_list: ['ConfigDrive']
 
 ### 修改 cloud-init 设置密码逻辑
 
-由 `scripts/04-configure-h3c-cloud-init.sh` 完成。
+由 `scripts/05-configure-h3c-cloud-init.sh` 完成。
 
 脚本会自动查找：
 
@@ -58,7 +59,7 @@ datasource_list: ['ConfigDrive']
 
 ### 修改 cloud-init 网卡映射逻辑
 
-由 `scripts/04-configure-h3c-cloud-init.sh` 完成。
+由 `scripts/05-configure-h3c-cloud-init.sh` 完成。
 
 脚本会自动查找：
 
@@ -75,7 +76,7 @@ datasource_list: ['ConfigDrive']
 
 手册中的 `ifcfg-ens14` 是示例网卡名，不适合在模板脚本里硬编码。
 
-本项目不固定写入某个 `ifcfg-ens14`。`scripts/05-seal-image.sh` 会遍历 `/etc/sysconfig/network-scripts/ifcfg-*`，跳过 `ifcfg-lo`，保留原有网卡名，并把配置规范为：
+本项目不固定写入某个 `ifcfg-ens14`。`scripts/06-seal-image.sh` 会遍历 `/etc/sysconfig/network-scripts/ifcfg-*`，跳过 `ifcfg-lo`，保留原有网卡名，并把配置规范为：
 
 ```ini
 DEVICE=<原网卡名>
@@ -99,6 +100,41 @@ setenforce 0
 
 如果系统没有 firewalld 或 SELinux 工具，会输出告警并继续。
 
+### 创建普通用户
+
+由 `scripts/01-install-base.sh` 和 `scripts/02-configure-level3-basic.sh` 完成。
+
+脚本会创建普通用户：
+
+```text
+appuser
+```
+
+初始密码为：
+
+```text
+1234qwer!@#$
+```
+
+如果用户已存在，脚本不会重复创建，只会重新设置密码。`scripts/02-configure-level3-basic.sh` 还会确保该用户不在 wheel 组，默认不能 sudo。
+
+### 配置等保三级基础策略
+
+由 `scripts/02-configure-level3-basic.sh` 完成。
+
+脚本会配置：
+
+```text
+登录失败锁定：900 秒内失败 8 次后锁定 300 秒
+密码复杂度：最小长度 12，要求数字、小写字母、特殊字符
+密码周期：普通用户最长 90 天过期，root 密码不过期
+sudo 控制：只允许 root 和 wheel 组使用 sudo
+会话超时：交互式 shell 3600 秒无操作退出
+SSH 加固：关闭 TCP 转发、StreamLocal 转发、Agent 转发、X11 转发和隧道
+```
+
+脚本会优先使用 `authselect` 管理 PAM；如果无法安全确认 PAM 配置，会停止并输出告警。
+
 ### 启用 SSH 服务
 
 由 `scripts/01-install-base.sh` 完成。
@@ -111,7 +147,7 @@ sshd.service
 
 ### 清除 Network Persistence Rules
 
-由 `scripts/05-seal-image.sh` 完成。
+由 `scripts/06-seal-image.sh` 完成。
 
 脚本会处理：
 
@@ -124,7 +160,7 @@ sshd.service
 
 ### 设置 cloud-init 服务开机自启
 
-由 `scripts/04-configure-h3c-cloud-init.sh` 完成。
+由 `scripts/05-configure-h3c-cloud-init.sh` 完成。
 
 脚本会启用：
 
@@ -143,4 +179,4 @@ cloud-final.service
 sudo shutdown -h now
 ```
 
-必须在 `scripts/05-seal-image.sh` 完成后执行。
+必须在 `scripts/06-seal-image.sh` 完成后执行。

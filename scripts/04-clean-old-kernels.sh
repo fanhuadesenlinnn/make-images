@@ -17,7 +17,7 @@ ensure_current_kernel_boot_files() {
   kver="$(uname -r)"
 
   if [ ! -f "/boot/initramfs-${kver}.img" ]; then
-    die "未找到当前内核 initramfs：/boot/initramfs-${kver}.img，请先执行 02 并重启验证"
+    die "未找到当前内核 initramfs：/boot/initramfs-${kver}.img，请先执行 03 并重启验证"
   fi
 
   if [ ! -f "/boot/vmlinuz-${kver}" ]; then
@@ -73,7 +73,7 @@ main() {
   refresh_grub
   clean_pkg_cache
   show_kernel_packages
-  log_info "03 完成：旧内核清理完成。下一步执行 scripts/04-configure-h3c-cloud-init.sh"
+  log_info "04 完成：旧内核清理完成。下一步执行 scripts/05-configure-h3c-cloud-init.sh"
 }
 
 main "$@"

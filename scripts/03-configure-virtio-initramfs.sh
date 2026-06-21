@@ -111,7 +111,7 @@ main() {
   rebuild_initramfs "$drivers"
   verify_initramfs
   refresh_grub
-  log_info "02 完成：请现在执行 sudo reboot，重启成功后再执行 03"
+  log_info "03 完成：请现在执行 sudo reboot，重启成功后再执行 scripts/04-clean-old-kernels.sh"
 }
 
 main "$@"

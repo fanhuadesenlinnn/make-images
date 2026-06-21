@@ -6,12 +6,16 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib/common.sh"
 
 EPEL_REPO="/etc/yum.repos.d/epel.repo"
+APP_USER_NAME="appuser"
+APP_USER_PASSWORD='1234qwer!@#$'
+APP_USER_SHELL="/bin/bash"
 UPDATE_EXCLUDED_PACKAGES=(
   python3-IPy
 )
 
 REQUIRED_PACKAGES=(
   acpid
+  authselect
   bash-completion
   bind-utils
   bzip2
@@ -30,6 +34,7 @@ REQUIRED_PACKAGES=(
   jq
   kmod
   less
+  libpwquality
   linux-firmware
   logrotate
   lvm2
@@ -184,6 +189,21 @@ configure_security_policy() {
   fi
 }
 
+configure_app_user() {
+  require_cmd useradd
+  require_cmd chpasswd
+
+  if id "$APP_USER_NAME" >/dev/null 2>&1; then
+    log_info "普通用户已存在，跳过创建：$APP_USER_NAME"
+  else
+    useradd -m -s "$APP_USER_SHELL" "$APP_USER_NAME"
+    log_info "已创建普通用户：$APP_USER_NAME"
+  fi
+
+  printf '%s:%s\n' "$APP_USER_NAME" "$APP_USER_PASSWORD" | chpasswd
+  log_info "已设置普通用户密码：$APP_USER_NAME"
+}
+
 configure_services_for_build_phase() {
   check_systemd
 
@@ -207,8 +227,9 @@ main() {
   install_required_packages
   install_optional_packages
   configure_security_policy
+  configure_app_user
   configure_services_for_build_phase
-  log_info "01 完成：基础软件已安装。下一步执行 scripts/02-configure-virtio-initramfs.sh"
+  log_info "01 完成：基础软件已安装。下一步执行 scripts/02-configure-level3-basic.sh"
 }
 
 main "$@"

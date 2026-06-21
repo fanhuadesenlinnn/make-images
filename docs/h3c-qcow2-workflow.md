@@ -8,16 +8,17 @@
 
 ```bash
 sudo bash scripts/01-install-base.sh
-sudo bash scripts/02-configure-virtio-initramfs.sh
+sudo bash scripts/02-configure-level3-basic.sh
+sudo bash scripts/03-configure-virtio-initramfs.sh
 sudo reboot
 ```
 
 重启成功后：
 
 ```bash
-sudo bash scripts/03-clean-old-kernels.sh
-sudo bash scripts/04-configure-h3c-cloud-init.sh
-sudo bash scripts/05-seal-image.sh
+sudo bash scripts/04-clean-old-kernels.sh
+sudo bash scripts/05-configure-h3c-cloud-init.sh
+sudo bash scripts/06-seal-image.sh
 sudo shutdown -h now
 ```
 

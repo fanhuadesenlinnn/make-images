@@ -196,7 +196,7 @@ main() {
   clean_vmware_network_state
   clean_runtime_files
   final_check
-  log_info "05 完成：请立即执行 sudo shutdown -h now，然后转换 QCOW2"
+  log_info "06 完成：请立即执行 sudo shutdown -h now，然后转换 QCOW2"
 }
 
 main "$@"

@@ -396,7 +396,7 @@ main() {
   patch_cloudinit_net_util
   enable_cloud_init_services
   cloud-init --version || true
-  log_info "04 完成：cloud-init 已配置为下次云平台启动使用。下一步执行 scripts/05-seal-image.sh"
+  log_info "05 完成：cloud-init 已配置为下次云平台启动使用。下一步执行 scripts/06-seal-image.sh"
 }
 
 main "$@"
