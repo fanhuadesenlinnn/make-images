@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/lib/common.sh"
 
 EPEL_REPO="/etc/yum.repos.d/epel.repo"
+UPDATE_EXCLUDED_PACKAGES=(
+  python3-IPy
+)
 
 REQUIRED_PACKAGES=(
   acpid
@@ -99,6 +102,32 @@ refresh_package_cache() {
   "$pm" makecache
 }
 
+update_system_packages() {
+  local pm
+  local pkg
+  local exclude_args=()
+
+  pm="$(detect_pkg_manager)"
+  log_info "执行系统升级：${pm} update -y"
+
+  if "$pm" update -y; then
+    log_info "系统升级完成"
+    return
+  fi
+
+  for pkg in "${UPDATE_EXCLUDED_PACKAGES[@]}"; do
+    exclude_args+=("--exclude=${pkg}")
+  done
+
+  log_warn "系统升级失败，按已知跨源冲突仅排除这些包后重试：${UPDATE_EXCLUDED_PACKAGES[*]}"
+  if "$pm" update -y "${exclude_args[@]}"; then
+    log_warn "系统升级已完成，但未更新这些已排除的软件包：${UPDATE_EXCLUDED_PACKAGES[*]}"
+    return
+  fi
+
+  die "系统升级失败：已尝试仅排除 ${UPDATE_EXCLUDED_PACKAGES[*]}，请检查 yum/dnf 源和剩余依赖冲突"
+}
+
 install_required_packages() {
   local pm
 
@@ -147,6 +176,7 @@ main() {
   print_os_info
   configure_epel_repo
   refresh_package_cache
+  update_system_packages
   install_required_packages
   install_optional_packages
   configure_services_for_build_phase

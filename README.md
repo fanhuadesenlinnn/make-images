@@ -63,7 +63,15 @@ sudo shutdown -h now
 
 ### 01-install-base.sh
 
-写入 EPEL 8 yum 源，刷新缓存，安装基础软件、排障工具、磁盘工具、cloud-init、cloud-utils-growpart、dracut、linux-firmware 等组件。
+写入 EPEL 8 yum 源，刷新缓存，执行系统升级，然后安装基础软件、排障工具、磁盘工具、cloud-init、cloud-utils-growpart、dracut、linux-firmware 等组件。
+
+如果系统升级遇到 `python3-IPy` 因不同 yum 源候选包导致的 Python ABI 依赖冲突，脚本会自动只排除这个包后重试：
+
+```bash
+yum update -y --exclude=python3-IPy
+```
+
+脚本不会使用 `--skip-broken` 跳过一批包；如果排除 `python3-IPy` 后仍然失败，会直接停止，避免掩盖其他源冲突。
 
 这个脚本只安装 cloud-init，不会清理 cloud-init 状态，也不会清空 `machine-id`。
 
@@ -181,6 +189,16 @@ qemu-img info kylin-h3c.qcow2
 ### 为什么 `02` 后要重启？
 
 因为 `02` 会重建 initramfs。只有重启成功，才能证明当前内核和 initramfs 还能正常启动。确认成功后再执行 `03` 删除旧内核。
+
+### 如果 `01` 系统升级遇到 python3-IPy 依赖错误怎么办？
+
+类似错误：
+
+```text
+nothing provides python(abi) = 3.6 needed by python3-IPy-1.00-3.el8.noarch
+```
+
+这是不同 yum 源之间的更新候选包冲突，不按坏包处理。`01-install-base.sh` 会先正常执行 `yum update -y`，失败后只使用 `--exclude=python3-IPy` 排除这个包再重试。如果仍然失败，脚本会停止并要求检查剩余源冲突。
 
 ### 如果 `03` 清理旧内核失败怎么办？
 
