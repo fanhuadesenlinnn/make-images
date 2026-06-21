@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 DATASOURCE_CFG="/etc/cloud/cloud.cfg.d/99-h3c-datasource.cfg"
 GROWPART_CFG="/etc/cloud/cloud.cfg.d/98-growpart-root.cfg"
+CLOUD_CFG="/etc/cloud/cloud.cfg"
 
 find_cloudinit_python_file() {
   local relative_path="$1"
@@ -26,7 +27,7 @@ find_cloudinit_python_file() {
 }
 
 write_cloud_init_datasource() {
-  log_info "写入 H3C V7 cloud-init 配置"
+  log_info "写入 H3C V7 cloud-init drop-in 配置"
 
   write_file_if_changed "$DATASOURCE_CFG" <<'EOF'
 # H3C 云平台 V7 镜像模板使用。
@@ -36,9 +37,147 @@ resize_rootfs_tmp: /dev
 ssh_deletekeys: 0
 ssh_genkeytypes: ~
 ssh_pwauth: 1
-chpasswd: { expire: false }
-datasource_list: [ ConfigDrive ]
+chpasswd: { expire: False}
+datasource_list: ['ConfigDrive']
 EOF
+}
+
+patch_cloud_cfg_main() {
+  local tmp
+
+  if [ ! -f "$CLOUD_CFG" ]; then
+    log_warn "未找到 $CLOUD_CFG，跳过主 cloud-init 配置文件修补"
+    return
+  fi
+
+  tmp="$(mktemp)"
+
+  python3 - "$CLOUD_CFG" > "$tmp" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines()
+
+desired = [
+    ("disable_root", "disable_root: 0"),
+    ("mount_default_fields", "mount_default_fields: [~, ~, 'auto', 'defaults,nofail', '0', '2']"),
+    ("resize_rootfs_tmp", "resize_rootfs_tmp: /dev"),
+    ("ssh_deletekeys", "ssh_deletekeys: 0"),
+    ("ssh_genkeytypes", "ssh_genkeytypes: ~"),
+    ("ssh_pwauth", "ssh_pwauth: 1"),
+    ("chpasswd", "chpasswd: { expire: False}"),
+    ("datasource_list", "datasource_list: ['ConfigDrive']"),
+]
+desired_map = dict(desired)
+seen = set()
+out = []
+i = 0
+
+def indent_width(line):
+    return len(line) - len(line.lstrip(" "))
+
+def patch_system_info_default_user(block):
+    patched = []
+    in_default_user = False
+    default_user_seen = False
+    default_user_indent = None
+    default_user_name_seen = False
+
+    for index, line in enumerate(block):
+        if index == 0:
+            patched.append(line)
+            continue
+
+        stripped = line.strip()
+        indent = indent_width(line)
+        default_user_match = re.match(r"^(\s*)default_user\s*:\s*(?:#.*)?$", line)
+
+        if default_user_match:
+            if in_default_user and not default_user_name_seen:
+                patched.append(" " * (default_user_indent + 2) + "name: root")
+
+            in_default_user = True
+            default_user_seen = True
+            default_user_indent = len(default_user_match.group(1))
+            default_user_name_seen = False
+            patched.append(line)
+            continue
+
+        if in_default_user:
+            if stripped and not stripped.startswith("#") and indent <= default_user_indent:
+                if not default_user_name_seen:
+                    patched.append(" " * (default_user_indent + 2) + "name: root")
+                in_default_user = False
+                default_user_indent = None
+                default_user_name_seen = False
+            else:
+                name_match = re.match(r"^(\s*)name\s*:.*$", line)
+                if name_match:
+                    patched.append(f"{name_match.group(1)}name: root")
+                    default_user_name_seen = True
+                    continue
+
+        patched.append(line)
+
+    if in_default_user and not default_user_name_seen:
+        patched.append(" " * (default_user_indent + 2) + "name: root")
+
+    if not default_user_seen:
+        patched.append("  default_user:")
+        patched.append("    name: root")
+
+    return patched
+
+while i < len(lines):
+    line = lines[i]
+    match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:", line)
+
+    if match and match.group(1) == "system_info":
+        block = [line]
+        i += 1
+        while i < len(lines) and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*:", lines[i]):
+            block.append(lines[i])
+            i += 1
+
+        out.extend(patch_system_info_default_user(block))
+        continue
+
+    if match and match.group(1) in desired_map:
+        key = match.group(1)
+        if key not in seen:
+            out.append(desired_map[key])
+            seen.add(key)
+
+        i += 1
+        while i < len(lines) and lines[i].startswith((" ", "\t")):
+            i += 1
+        continue
+
+    out.append(line)
+    i += 1
+
+missing = [line for key, line in desired if key not in seen]
+if missing:
+    if out and out[-1].strip():
+        out.append("")
+    out.append("# H3C V7 cloud-init image settings")
+    out.extend(missing)
+
+sys.stdout.write("\n".join(out) + "\n")
+PY
+
+  if cmp -s "$tmp" "$CLOUD_CFG"; then
+    rm -f "$tmp"
+    log_info "主 cloud-init 配置未变化：$CLOUD_CFG"
+    return
+  fi
+
+  backup_file "$CLOUD_CFG"
+  install -m 0644 "$tmp" "$CLOUD_CFG"
+  rm -f "$tmp"
+  log_info "已修补主 cloud-init 配置：$CLOUD_CFG"
 }
 
 write_growpart_config() {
@@ -75,25 +214,46 @@ text = path.read_text(encoding="utf-8")
 
 changed = False
 
-if "metadata = cloud.datasource.metadata" not in text or "'admin_pass' in metadata" not in text:
-    pattern = re.compile(
-        r'(?m)^(\s*)password\s*=\s*util\.get_cfg_option_str\(cfg,\s*["\']password["\'],\s*None\)\s*$'
-    )
-    match = pattern.search(text)
-    if not match:
-        print("password config lookup pattern not found", file=sys.stderr)
-        raise SystemExit(1)
+password_pattern = re.compile(
+    r'(?m)^(\s*)password\s*=\s*util\.get_cfg_option_str\(cfg,\s*["\']password["\'],\s*None\)[ \t]*$'
+)
+match = password_pattern.search(text)
+if not match:
+    print("password config lookup pattern not found", file=sys.stderr)
+    raise SystemExit(1)
 
-    indent = match.group(1)
-    admin_pass_block = (
-        f"{match.group(0)}\n"
-        f"{indent}if not password:\n"
-        f"{indent}    metadata = cloud.datasource.metadata\n"
-        f"{indent}    if metadata and 'admin_pass' in metadata:\n"
-        f"{indent}        password = metadata['admin_pass']"
-    )
-    text = text[:match.start()] + admin_pass_block + text[match.end():]
-    changed = True
+admin_pass_pattern = re.compile(
+    r'\n+\s*if not password:\n'
+    r'\s+metadata\s*=\s*cloud\.datasource\.metadata\n'
+    r'\s+if metadata and [\'"]admin_pass[\'"] in metadata:\n'
+    r'\s+password\s*=\s*metadata\[[\'"]admin_pass[\'"]\]'
+)
+text = admin_pass_pattern.sub("", text, count=1)
+
+match = password_pattern.search(text)
+password_indent = match.group(1)
+if password_indent.endswith("    "):
+    block_indent = password_indent[:-4]
+elif password_indent.endswith("\t"):
+    block_indent = password_indent[:-1]
+else:
+    block_indent = password_indent
+
+metadata_indent = password_indent
+password_value_indent = metadata_indent + ("    " if "\t" not in metadata_indent else "\t")
+admin_pass_block = (
+    f"{match.group(0)}\n\n"
+    f"{block_indent}if not password:\n"
+    f"{metadata_indent}metadata = cloud.datasource.metadata\n"
+    f"{metadata_indent}if metadata and 'admin_pass' in metadata:\n"
+    f"{password_value_indent}password = metadata['admin_pass']"
+)
+rest_start = match.end()
+while rest_start < len(text) and text[rest_start] == "\n":
+    rest_start += 1
+rest = text[rest_start:]
+text = text[:match.start()] + admin_pass_block + ("\n" + rest if rest else "")
+changed = True
 
 needle = 'plist = ["%s:%s" % (user, password)]'
 replacement = 'plist = ["%s:%s" % ("root", password)]'
@@ -194,7 +354,27 @@ if "netdev = netinfo.netdev_info()" not in text:
     text = text.replace(needle, needle + "    netdev = netinfo.netdev_info()\n", 1)
     changed = True
 
-if "H3C: map metadata hwaddress to actual guest device name." not in text:
+def remove_legacy_h3c_block(source):
+    source_lines = source.splitlines()
+    cleaned = []
+    removed = False
+    index = 0
+
+    while index < len(source_lines):
+        if source_lines[index].strip() == "# H3C: map metadata hwaddress to actual guest device name.":
+            index += 9
+            removed = True
+            continue
+
+        cleaned.append(source_lines[index])
+        index += 1
+
+    return "\n".join(cleaned) + "\n", removed
+
+text, removed_legacy = remove_legacy_h3c_block(text)
+changed = changed or removed_legacy
+
+if "for (dev, d) in netdev.iteritems():" not in text:
     lines = text.splitlines()
     out = []
     inserted = False
@@ -208,20 +388,35 @@ if "H3C: map metadata hwaddress to actual guest device name." not in text:
             inner = indent + "    "
             inner2 = inner + "    "
             out.extend([
-                f"{indent}# H3C: map metadata hwaddress to actual guest device name.",
-                f"{indent}for (dev, d) in netdev.items():",
-                f"{inner}if d.get(\"hwaddr\", \"\").lower() == hw_addr:",
+                f"{indent}for (dev, d) in netdev.iteritems():",
+                f"{inner}if d[\"hwaddr\"] == hw_addr:",
                 f"{inner2}dev_name = dev.strip().split(':')[0]",
-                f"{inner2}if dev_name in real_ifaces:",
-                f"{inner2}    real_ifaces[dev_name].update(iface_info)",
-                f"{inner2}else:",
-                f"{inner2}    real_ifaces[dev_name] = iface_info",
-                f"{inner2}real_ifaces[dev_name]['auto'] = True",
             ])
             inserted = True
 
     if not inserted:
         print("iface_info['hwaddress'] assignment not found", file=sys.stderr)
+        raise SystemExit(1)
+
+    text = "\n".join(out) + "\n"
+    changed = True
+
+if "real_ifaces[dev_name]['auto'] = True" not in text:
+    lines = text.splitlines()
+    out = []
+    inserted = False
+    pattern = re.compile(r"^(\s*)real_ifaces\[dev_name\]\s*=\s*iface_info\s*$")
+
+    for line in lines:
+        out.append(line)
+        match = pattern.match(line)
+        if match and not inserted:
+            indent = match.group(1)
+            out.append(f"{indent}real_ifaces[dev_name]['auto'] = True")
+            inserted = True
+
+    if not inserted:
+        print("real_ifaces[dev_name] assignment not found", file=sys.stderr)
         raise SystemExit(1)
 
     text = "\n".join(out) + "\n"
@@ -253,6 +448,7 @@ main() {
   require_cmd python3
   require_cmd cloud-init
   print_os_info
+  patch_cloud_cfg_main
   write_growpart_config
   write_cloud_init_datasource
   patch_cloudinit_set_passwords

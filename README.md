@@ -94,13 +94,20 @@ yum update -y --exclude=python3-IPy
 
 ### 04-configure-h3c-cloud-init.sh
 
-写入 H3C 云平台镜像使用的 cloud-init 配置：
+修补 `/etc/cloud/cloud.cfg`，并写入 H3C 云平台镜像使用的 cloud-init drop-in 配置：
 
 ```yaml
 disable_root: 0
+mount_default_fields: [~, ~, 'auto', 'defaults,nofail', '0', '2']
+resize_rootfs_tmp: /dev
+ssh_deletekeys: 0
+ssh_genkeytypes: ~
 ssh_pwauth: 1
-chpasswd: { expire: false }
-datasource_list: [ ConfigDrive ]
+chpasswd: { expire: False}
+datasource_list: ['ConfigDrive']
+system_info:
+  default_user:
+    name: root
 ```
 
 同时按 H3C V7 手册修补 cloud-init 的 root 密码设置逻辑和网卡 MAC 映射逻辑，并启用 cloud-init 相关 systemd 服务，让模板在云平台首次启动时可以读取元数据。
@@ -116,7 +123,7 @@ datasource_list: [ ConfigDrive ]
 - 清理 `/var/lib/cloud/instances` 和 `/var/lib/cloud/instance`。
 - 清空 `/etc/machine-id`。
 - 重建 `/var/lib/dbus/machine-id` 到 `/etc/machine-id` 的软链接。
-- 清理 VMware 常见网卡痕迹。
+- 清理 VMware 常见网卡痕迹，并把非 `lo` 的 `ifcfg-*` 网卡配置规范为只保留 `DEVICE`、`ONBOOT`、`BOOTPROTO`、`TYPE`、`NM_CONTROLLED`。
 - 清理 yum/dnf 缓存和临时目录。
 
 执行时需要输入 `YES` 确认。
@@ -129,6 +136,7 @@ datasource_list: [ ConfigDrive ]
 /etc/yum.repos.d/epel.repo
 /etc/selinux/config
 /etc/dracut.conf.d/99-h3c-kvm-generic.conf
+/etc/cloud/cloud.cfg
 /etc/cloud/cloud.cfg.d/98-growpart-root.cfg
 /etc/cloud/cloud.cfg.d/99-h3c-datasource.cfg
 /usr/lib/python*/site-packages/cloudinit/config/cc_set_passwords.py
@@ -143,8 +151,7 @@ datasource_list: [ ConfigDrive ]
 /var/lib/cloud
 /etc/udev/rules.d/70-persistent-net.rules
 /lib/udev/rules.d/75-persistent-net-generator.rules
-/etc/sysconfig/network-scripts/ifcfg-ens160
-/etc/sysconfig/network-scripts/ifcfg-ens192
+/etc/sysconfig/network-scripts/ifcfg-*
 /var/cache/yum
 /var/cache/dnf
 ```

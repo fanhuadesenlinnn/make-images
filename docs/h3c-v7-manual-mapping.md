@@ -21,9 +21,10 @@ sudo shutdown -h now
 
 由 `scripts/04-configure-h3c-cloud-init.sh` 完成。
 
-脚本写入：
+脚本会修补主配置文件，并额外写入 drop-in 覆盖配置：
 
 ```text
+/etc/cloud/cloud.cfg
 /etc/cloud/cloud.cfg.d/99-h3c-datasource.cfg
 ```
 
@@ -36,8 +37,11 @@ resize_rootfs_tmp: /dev
 ssh_deletekeys: 0
 ssh_genkeytypes: ~
 ssh_pwauth: 1
-chpasswd: { expire: false }
-datasource_list: [ ConfigDrive ]
+chpasswd: { expire: False}
+datasource_list: ['ConfigDrive']
+system_info:
+  default_user:
+    name: root
 ```
 
 ### 修改 cloud-init 设置密码逻辑
@@ -74,7 +78,15 @@ datasource_list: [ ConfigDrive ]
 
 手册中的 `ifcfg-ens14` 是示例网卡名，不适合在模板脚本里硬编码。
 
-本项目不固定写入某个 `ifcfg-ens14`，而是在 `scripts/05-seal-image.sh` 中清理 VMware 常见网卡文件和持久网卡规则，让 H3C 首次启动时由 cloud-init 生成实际网卡配置。
+本项目不固定写入某个 `ifcfg-ens14`。`scripts/05-seal-image.sh` 会遍历 `/etc/sysconfig/network-scripts/ifcfg-*`，跳过 `ifcfg-lo`，保留原有网卡名，并把配置规范为：
+
+```ini
+DEVICE=<原网卡名>
+ONBOOT=no
+BOOTPROTO=dhcp
+TYPE=Ethernet
+NM_CONTROLLED=no
+```
 
 ### 关闭 firewalld，永久关闭 SELinux
 
