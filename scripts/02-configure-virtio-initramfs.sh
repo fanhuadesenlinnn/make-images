@@ -7,9 +7,13 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 DRACUT_CONF="/etc/dracut.conf.d/99-h3c-kvm-generic.conf"
 PREFERRED_DRIVERS=(
+  cdrom
+  sr_mod
+  isofs
   virtio_blk
   virtio_scsi
   virtio_console
+  sg
   sd_mod
   dm_mod
   xfs
@@ -60,6 +64,7 @@ EOF
 }
 
 rebuild_initramfs() {
+  local driver_text="$1"
   local kver
   local image
 
@@ -69,7 +74,8 @@ rebuild_initramfs() {
   image="/boot/initramfs-${kver}.img"
 
   log_info "重建 initramfs：$image"
-  dracut -f "$image" "$kver"
+  log_info "本次 dracut 显式加入驱动：$driver_text"
+  dracut -f --add-drivers "$driver_text" "$image" "$kver"
 }
 
 verify_initramfs() {
@@ -85,8 +91,8 @@ verify_initramfs() {
   fi
 
   log_info "检查 initramfs 中的关键模块"
-  if lsinitrd "$image" | grep -Eq 'virtio_blk|virtio_scsi|virtio_console|sd_mod|dm-mod|xfs|ext4|ahci|libata|ata_piix'; then
-    lsinitrd "$image" | grep -E 'virtio_blk|virtio_scsi|virtio_console|sd_mod|dm-mod|xfs|ext4|ahci|libata|ata_piix' || true
+  if lsinitrd "$image" | grep -Eq 'cdrom|sr_mod|isofs|virtio_blk|virtio_scsi|virtio_console|sg|sd_mod|dm-mod|xfs|ext4|ahci|libata|ata_piix'; then
+    lsinitrd "$image" | grep -E 'cdrom|sr_mod|isofs|virtio_blk|virtio_scsi|virtio_console|sg|sd_mod|dm-mod|xfs|ext4|ahci|libata|ata_piix' || true
     log_info "initramfs 检查通过"
   else
     log_warn "没有在 initramfs 中看到预期模块，请人工执行 lsinitrd 检查"
@@ -102,7 +108,7 @@ main() {
   drivers="$(build_driver_list)"
   [ -n "$drivers" ] || die "当前系统没有发现可写入 initramfs 的目标模块"
   write_dracut_config "$drivers"
-  rebuild_initramfs
+  rebuild_initramfs "$drivers"
   verify_initramfs
   refresh_grub
   log_info "02 完成：请现在执行 sudo reboot，重启成功后再执行 03"

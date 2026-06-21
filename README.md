@@ -3,7 +3,7 @@
 这个项目用于把 VMware 里的 Kylin 虚拟机整理成可以上传到华三云平台的镜像母盘。流程目标是：
 
 - 在 Kylin 内安装基础工具、云平台所需组件和 VirtIO/KVM 迁移相关驱动。
-- 重建通用 initramfs，避免 VMDK 转 QCOW2 后在云平台无法识别系统盘。
+- 重建通用 initramfs，避免 VMDK 转 QCOW2 后在云平台无法识别系统盘或 cloud-init 数据光驱。
 - 清理旧内核，减小模板体积。
 - 在最后一步配置 cloud-init 并封装系统状态。
 - 关机后把 VMware VMDK 转成 QCOW2，上传到 H3C 云平台作为镜像模板。
@@ -69,9 +69,9 @@ sudo shutdown -h now
 
 ### 02-configure-virtio-initramfs.sh
 
-写入 `/etc/dracut.conf.d/99-h3c-kvm-generic.conf`，设置 `hostonly="no"`，并把当前系统存在的 VirtIO、SCSI、文件系统和磁盘控制器模块加入 initramfs。
+写入 `/etc/dracut.conf.d/99-h3c-kvm-generic.conf`，设置 `hostonly="no"`，并把当前系统存在的 VirtIO、SCSI、光驱、ISO 文件系统和磁盘控制器模块加入 initramfs。
 
-然后重建当前内核的 initramfs，并刷新 grub。
+然后用 `dracut -f --add-drivers` 重建当前内核的 initramfs，并刷新 grub。
 
 执行完成后必须重启一次，确认当前内核和 initramfs 可以正常启动。
 
@@ -137,7 +137,7 @@ datasource_list: [ ConfigDrive, NoCloud, None ]
 
 ```bash
 KVER="$(uname -r)"
-lsinitrd "/boot/initramfs-${KVER}.img" | grep -E 'virtio_blk|virtio_scsi|virtio_console|sd_mod|dm-mod|xfs|ext4|ahci|libata|ata_piix'
+lsinitrd "/boot/initramfs-${KVER}.img" | grep -E 'cdrom|sr_mod|isofs|virtio_blk|virtio_scsi|virtio_console|sg|sd_mod|dm-mod|xfs|ext4|ahci|libata|ata_piix'
 ```
 
 在执行 `04` 后可以检查 cloud-init 配置：

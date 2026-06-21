@@ -93,4 +93,4 @@ journalctl -u cloud-init --no-pager
 - 主机名、SSH 密钥、网络配置符合 H3C 下发结果。
 - 根分区按预期扩容。
 
-如果系统无法启动，优先检查 initramfs 是否包含 VirtIO/SCSI/文件系统相关模块，以及 H3C 创建云主机时选择的启动方式是否和 VMware 内系统一致。
+如果系统无法启动或首次启动找不到 cloud-init 数据光驱，优先检查 initramfs 是否包含 VirtIO/SCSI/光驱/ISO 文件系统相关模块，以及 H3C 创建云主机时选择的启动方式是否和 VMware 内系统一致。
