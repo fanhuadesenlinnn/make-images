@@ -75,7 +75,7 @@ clean_machine_id() {
 clean_vmware_network_state() {
   local file
 
-  log_info "清理 VMware 常见网卡痕迹"
+  log_info "清理 VMware 常见网卡痕迹和持久网卡规则"
 
   file="/etc/udev/rules.d/70-persistent-net.rules"
   if [ -e "$file" ] || [ -L "$file" ]; then
@@ -94,6 +94,16 @@ clean_vmware_network_state() {
       log_info "已删除：$file"
     fi
   done
+
+  file="/lib/udev/rules.d/75-persistent-net-generator.rules"
+  if [ -e "$file" ] || [ -L "$file" ]; then
+    backup_file "$file"
+    if : > "$file"; then
+      log_info "已清空：$file"
+    else
+      log_warn "清空失败，请人工检查：$file"
+    fi
+  fi
 }
 
 clean_runtime_files() {

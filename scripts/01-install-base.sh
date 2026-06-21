@@ -157,6 +157,33 @@ install_optional_packages() {
   done
 }
 
+configure_security_policy() {
+  log_info "按 H3C V7 手册关闭 firewalld，并将 SELinux 设置为 disabled"
+
+  if have_cmd systemctl; then
+    disable_now_unit_if_exists firewalld.service
+  fi
+
+  if have_cmd getenforce && have_cmd setenforce; then
+    if [ "$(getenforce 2>/dev/null || printf Disabled)" != "Disabled" ]; then
+      setenforce 0 || log_warn "临时关闭 SELinux 失败，请人工检查"
+      log_info "已尝试临时关闭 SELinux"
+    fi
+  fi
+
+  if [ -f /etc/selinux/config ]; then
+    backup_file /etc/selinux/config
+    if grep -q '^SELINUX=' /etc/selinux/config; then
+      sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+    else
+      printf '\nSELINUX=disabled\n' >> /etc/selinux/config
+    fi
+    log_info "已设置 /etc/selinux/config: SELINUX=disabled"
+  else
+    log_warn "未找到 /etc/selinux/config，跳过 SELinux 永久配置"
+  fi
+}
+
 configure_services_for_build_phase() {
   check_systemd
 
@@ -179,6 +206,7 @@ main() {
   update_system_packages
   install_required_packages
   install_optional_packages
+  configure_security_policy
   configure_services_for_build_phase
   log_info "01 完成：基础软件已安装。下一步执行 scripts/02-configure-virtio-initramfs.sh"
 }

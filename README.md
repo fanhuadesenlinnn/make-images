@@ -27,6 +27,7 @@
 README.md
 docs/
   h3c-qcow2-workflow.md
+  h3c-v7-manual-mapping.md
 scripts/
   01-install-base.sh
   02-configure-virtio-initramfs.sh
@@ -73,6 +74,8 @@ yum update -y --exclude=python3-IPy
 
 脚本不会使用 `--skip-broken` 跳过一批包；如果排除 `python3-IPy` 后仍然失败，会直接停止，避免掩盖其他源冲突。
 
+这个脚本还会按 H3C V7 手册关闭 `firewalld`、将 SELinux 设置为 `disabled`，并启用 SSH 服务。
+
 这个脚本只安装 cloud-init，不会清理 cloud-init 状态，也不会清空 `machine-id`。
 
 ### 02-configure-virtio-initramfs.sh
@@ -94,10 +97,13 @@ yum update -y --exclude=python3-IPy
 写入 H3C 云平台镜像使用的 cloud-init 配置：
 
 ```yaml
-datasource_list: [ ConfigDrive, NoCloud, None ]
+disable_root: 0
+ssh_pwauth: 1
+chpasswd: { expire: false }
+datasource_list: [ ConfigDrive ]
 ```
 
-同时启用 cloud-init 相关 systemd 服务，让模板在云平台首次启动时可以读取元数据。
+同时按 H3C V7 手册修补 cloud-init 的 root 密码设置逻辑和网卡 MAC 映射逻辑，并启用 cloud-init 相关 systemd 服务，让模板在云平台首次启动时可以读取元数据。
 
 这个脚本不清理 `machine-id`，不清理网卡配置，不执行 `cloud-init clean`。
 
@@ -121,9 +127,14 @@ datasource_list: [ ConfigDrive, NoCloud, None ]
 
 ```text
 /etc/yum.repos.d/epel.repo
+/etc/selinux/config
 /etc/dracut.conf.d/99-h3c-kvm-generic.conf
 /etc/cloud/cloud.cfg.d/98-growpart-root.cfg
 /etc/cloud/cloud.cfg.d/99-h3c-datasource.cfg
+/usr/lib/python*/site-packages/cloudinit/config/cc_set_passwords.py
+/usr/lib/python*/site-packages/cloudinit/distros/net_util.py
+/usr/local/lib/python*/site-packages/cloudinit/config/cc_set_passwords.py
+/usr/local/lib/python*/site-packages/cloudinit/distros/net_util.py
 /boot/initramfs-*.img
 /boot/grub2/grub.cfg
 /boot/efi/EFI/kylin/grub.cfg
@@ -131,6 +142,7 @@ datasource_list: [ ConfigDrive, NoCloud, None ]
 /var/lib/dbus/machine-id
 /var/lib/cloud
 /etc/udev/rules.d/70-persistent-net.rules
+/lib/udev/rules.d/75-persistent-net-generator.rules
 /etc/sysconfig/network-scripts/ifcfg-ens160
 /etc/sysconfig/network-scripts/ifcfg-ens192
 /var/cache/yum
@@ -166,6 +178,8 @@ test ! -d /var/lib/cloud/instance && echo "cloud-init instance is clean"
 ## VMDK 转 QCOW2
 
 关机后再转换镜像，详细步骤见 [docs/h3c-qcow2-workflow.md](docs/h3c-qcow2-workflow.md)。
+
+H3C V7 手册中的配置步骤与脚本对应关系见 [docs/h3c-v7-manual-mapping.md](docs/h3c-v7-manual-mapping.md)。
 
 基本命令：
 
