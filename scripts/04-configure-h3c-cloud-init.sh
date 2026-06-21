@@ -63,27 +63,54 @@ patch_cloudinit_set_passwords() {
   fi
 
   backup_file "$target"
-  log_info "修补 cloud-init 设置密码目标用户：$target"
+  log_info "修补 cloud-init admin_pass 读取和 root 密码目标用户：$target"
 
   if python3 - "$target" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 
-if '"root", password' in text:
-    print("already patched")
-    raise SystemExit(0)
+changed = False
+
+if "metadata = cloud.datasource.metadata" not in text or "'admin_pass' in metadata" not in text:
+    pattern = re.compile(
+        r'(?m)^(\s*)password\s*=\s*util\.get_cfg_option_str\(cfg,\s*["\']password["\'],\s*None\)\s*$'
+    )
+    match = pattern.search(text)
+    if not match:
+        print("password config lookup pattern not found", file=sys.stderr)
+        raise SystemExit(1)
+
+    indent = match.group(1)
+    admin_pass_block = (
+        f"{match.group(0)}\n"
+        f"{indent}if not password:\n"
+        f"{indent}    metadata = cloud.datasource.metadata\n"
+        f"{indent}    if metadata and 'admin_pass' in metadata:\n"
+        f"{indent}        password = metadata['admin_pass']"
+    )
+    text = text[:match.start()] + admin_pass_block + text[match.end():]
+    changed = True
 
 needle = 'plist = ["%s:%s" % (user, password)]'
 replacement = 'plist = ["%s:%s" % ("root", password)]'
 
-if needle not in text:
+if '"root", password' in text:
+    pass
+elif needle in text:
+    text = text.replace(needle, replacement, 1)
+    changed = True
+else:
     print(f"pattern not found: {needle}", file=sys.stderr)
     raise SystemExit(1)
 
-path.write_text(text.replace(needle, replacement, 1), encoding="utf-8")
+if changed:
+    path.write_text(text, encoding="utf-8")
+else:
+    print("already patched")
 PY
   then
     log_info "cc_set_passwords.py 补丁完成"
@@ -113,18 +140,51 @@ text = path.read_text(encoding="utf-8")
 
 changed = False
 
-if "from cloudinit import netinfo" not in text:
-    lines = text.splitlines()
+lines = text.splitlines()
+in_cloudinit_multiline_import = False
+netinfo_import_present = False
+cleaned_lines = []
+
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("from cloudinit.") and stripped.endswith("("):
+        in_cloudinit_multiline_import = True
+    if in_cloudinit_multiline_import and stripped == "from cloudinit import netinfo":
+        changed = True
+        continue
+    if not in_cloudinit_multiline_import and stripped == "from cloudinit import netinfo":
+        netinfo_import_present = True
+    cleaned_lines.append(line)
+    if in_cloudinit_multiline_import and stripped.endswith(")"):
+        in_cloudinit_multiline_import = False
+
+lines = cleaned_lines
+
+if not netinfo_import_present:
     insert_at = None
+    in_multiline_import = False
+
     for i, line in enumerate(lines):
-        if line.startswith("from cloudinit ") or line.startswith("from cloudinit."):
+        stripped = line.strip()
+        if stripped.startswith("from cloudinit.") and stripped.endswith("("):
+            in_multiline_import = True
+        if in_multiline_import:
+            if stripped.endswith(")"):
+                insert_at = i + 1
+                in_multiline_import = False
+            continue
+        if stripped.startswith("from cloudinit ") or stripped.startswith("from cloudinit."):
             insert_at = i + 1
+
     if insert_at is None:
         print("cloudinit import block not found", file=sys.stderr)
         raise SystemExit(1)
+
     lines.insert(insert_at, "from cloudinit import netinfo")
-    text = "\n".join(lines) + "\n"
     changed = True
+
+if changed:
+    text = "\n".join(lines) + "\n"
 
 if "netdev = netinfo.netdev_info()" not in text:
     needle = "def translate_network(settings):\n"
