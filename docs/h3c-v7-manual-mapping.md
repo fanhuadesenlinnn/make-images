@@ -39,9 +39,6 @@ ssh_genkeytypes: ~
 ssh_pwauth: 1
 chpasswd: { expire: False}
 datasource_list: ['ConfigDrive']
-system_info:
-  default_user:
-    name: root
 ```
 
 ### 修改 cloud-init 设置密码逻辑

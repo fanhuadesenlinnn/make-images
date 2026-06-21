@@ -75,74 +75,9 @@ seen = set()
 out = []
 i = 0
 
-def indent_width(line):
-    return len(line) - len(line.lstrip(" "))
-
-def patch_system_info_default_user(block):
-    patched = []
-    in_default_user = False
-    default_user_seen = False
-    default_user_indent = None
-    default_user_name_seen = False
-
-    for index, line in enumerate(block):
-        if index == 0:
-            patched.append(line)
-            continue
-
-        stripped = line.strip()
-        indent = indent_width(line)
-        default_user_match = re.match(r"^(\s*)default_user\s*:\s*(?:#.*)?$", line)
-
-        if default_user_match:
-            if in_default_user and not default_user_name_seen:
-                patched.append(" " * (default_user_indent + 2) + "name: root")
-
-            in_default_user = True
-            default_user_seen = True
-            default_user_indent = len(default_user_match.group(1))
-            default_user_name_seen = False
-            patched.append(line)
-            continue
-
-        if in_default_user:
-            if stripped and not stripped.startswith("#") and indent <= default_user_indent:
-                if not default_user_name_seen:
-                    patched.append(" " * (default_user_indent + 2) + "name: root")
-                in_default_user = False
-                default_user_indent = None
-                default_user_name_seen = False
-            else:
-                name_match = re.match(r"^(\s*)name\s*:.*$", line)
-                if name_match:
-                    patched.append(f"{name_match.group(1)}name: root")
-                    default_user_name_seen = True
-                    continue
-
-        patched.append(line)
-
-    if in_default_user and not default_user_name_seen:
-        patched.append(" " * (default_user_indent + 2) + "name: root")
-
-    if not default_user_seen:
-        patched.append("  default_user:")
-        patched.append("    name: root")
-
-    return patched
-
 while i < len(lines):
     line = lines[i]
     match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:", line)
-
-    if match and match.group(1) == "system_info":
-        block = [line]
-        i += 1
-        while i < len(lines) and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*:", lines[i]):
-            block.append(lines[i])
-            i += 1
-
-        out.extend(patch_system_info_default_user(block))
-        continue
 
     if match and match.group(1) in desired_map:
         key = match.group(1)

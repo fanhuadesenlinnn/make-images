@@ -105,9 +105,6 @@ ssh_genkeytypes: ~
 ssh_pwauth: 1
 chpasswd: { expire: False}
 datasource_list: ['ConfigDrive']
-system_info:
-  default_user:
-    name: root
 ```
 
 同时按 H3C V7 手册修补 cloud-init 的 root 密码设置逻辑和网卡 MAC 映射逻辑，并启用 cloud-init 相关 systemd 服务，让模板在云平台首次启动时可以读取元数据。
