@@ -401,24 +401,30 @@ if "for (dev, d) in netdev.iteritems():" not in text:
     text = "\n".join(out) + "\n"
     changed = True
 
-if "real_ifaces[dev_name]['auto'] = True" not in text:
-    lines = text.splitlines()
-    out = []
-    inserted = False
-    pattern = re.compile(r"^(\s*)real_ifaces\[dev_name\]\s*=\s*iface_info\s*$")
+lines = text.splitlines()
+out = []
+auto_checked = False
+auto_inserted = False
+pattern = re.compile(r"^(\s*)real_ifaces\[dev_name\]\s*=\s*iface_info\s*$")
 
-    for line in lines:
-        out.append(line)
-        match = pattern.match(line)
-        if match and not inserted:
-            indent = match.group(1)
-            out.append(f"{indent}real_ifaces[dev_name]['auto'] = True")
-            inserted = True
+for index, line in enumerate(lines):
+    out.append(line)
+    match = pattern.match(line)
+    if match and not auto_checked:
+        indent = match.group(1)
+        expected = f"{indent}real_ifaces[dev_name]['auto'] = True"
+        next_line = lines[index + 1] if index + 1 < len(lines) else ""
+        auto_checked = True
 
-    if not inserted:
-        print("real_ifaces[dev_name] assignment not found", file=sys.stderr)
-        raise SystemExit(1)
+        if next_line != expected:
+            out.append(expected)
+            auto_inserted = True
 
+if not auto_checked:
+    print("real_ifaces[dev_name] assignment not found", file=sys.stderr)
+    raise SystemExit(1)
+
+if auto_inserted:
     text = "\n".join(out) + "\n"
     changed = True
 
