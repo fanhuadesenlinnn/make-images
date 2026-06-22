@@ -45,16 +45,23 @@ scripts/
 
 ## 执行顺序
 
-第一阶段：系统准备。
+第一阶段：安装基础组件并完成系统升级。`01-install-base.sh` 可能安装新内核，所以执行后先重启，确保后续操作基于最终启动内核。
 
 ```bash
 sudo bash scripts/01-install-base.sh
+sudo reboot
+```
+
+第二阶段：完成等保基础配置并重建所有已安装内核的 initramfs。
+
+```bash
+uname -r
 sudo bash scripts/02-configure-level3-basic.sh
 sudo bash scripts/03-configure-virtio-initramfs.sh
 sudo reboot
 ```
 
-重启后确认系统能正常进入 Kylin，再执行第二阶段。
+第三阶段：重启后确认系统能正常进入 Kylin，再清理旧内核、配置 cloud-init，并执行最终封装。
 
 ```bash
 uname -r
@@ -108,9 +115,9 @@ yum update -y --exclude=python3-IPy
 
 ### 03-configure-virtio-initramfs.sh
 
-写入 `/etc/dracut.conf.d/99-h3c-kvm-generic.conf`，设置 `hostonly="no"`，并把当前系统存在的 VirtIO、SCSI、光驱、ISO 文件系统和磁盘控制器模块加入 initramfs。
+写入 `/etc/dracut.conf.d/99-h3c-kvm-generic.conf`，设置 `hostonly="no"`，并把当前系统存在的 VirtIO、SCSI、光驱、ISO 文件系统、SATA/IDE、NVMe、VMware PVSCSI 等存储相关模块加入 initramfs。
 
-然后用 `dracut -f --add-drivers` 重建当前内核的 initramfs，并刷新 grub。
+脚本会遍历 `/boot/vmlinuz-*`，只要对应的 `/lib/modules/<内核版本>` 存在，就对该内核执行 `dracut -f --add-drivers`。这样可以避免 `01-install-base.sh` 升级内核后，只重建旧运行内核 initramfs 的问题。
 
 执行完成后必须重启一次，确认当前内核和 initramfs 可以正常启动。
 
@@ -219,8 +226,12 @@ sshd -t -f /etc/ssh/sshd_config
 在执行 `03` 后可以检查 initramfs：
 
 ```bash
-KVER="$(uname -r)"
-lsinitrd "/boot/initramfs-${KVER}.img" | grep -E 'cdrom|sr_mod|isofs|virtio_blk|virtio_scsi|virtio_console|sg|sd_mod|dm-mod|xfs|ext4|ahci|libata|ata_piix'
+for vmlinuz in /boot/vmlinuz-*; do
+  KVER="${vmlinuz#/boot/vmlinuz-}"
+  [ -d "/lib/modules/${KVER}" ] || continue
+  echo "=== ${KVER} ==="
+  lsinitrd "/boot/initramfs-${KVER}.img" | grep -E 'virtio|virtio_pci|virtio_ring|virtio_blk|virtio_scsi|scsi_mod|sd_mod|dm-mod|xfs|ext4|ahci|libata|ata_piix|nvme|vmw_pvscsi'
+done
 ```
 
 在执行 `05` 后可以检查 cloud-init 配置：
@@ -263,9 +274,13 @@ qemu-img info kylin-h3c.qcow2
 - `05` 写最终云平台配置。
 - `06` 才做封装清理。
 
+### 为什么 `01` 后要先重启？
+
+因为 `01-install-base.sh` 会执行系统升级，可能安装新内核。先重启可以确认系统已经运行在升级后的内核上，避免后续误判当前内核状态。
+
 ### 为什么 `03` 后要重启？
 
-因为 `03` 会重建 initramfs。只有重启成功，才能证明当前内核和 initramfs 还能正常启动。确认成功后再执行 `04` 删除旧内核。
+因为 `03` 会重建所有已安装内核的 initramfs。只有重启成功，才能证明当前内核和 initramfs 还能正常启动。确认成功后再执行 `04` 删除旧内核。
 
 ### 如果 `01` 系统升级遇到 python3-IPy 依赖错误怎么办？
 
