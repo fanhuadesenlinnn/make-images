@@ -15,6 +15,7 @@ PREFERRED_DRIVERS=(
   isofs
 
   # KVM / H3C 常见 VirtIO 总线与磁盘控制器。
+  # 注意：virtio/virtio_ring 在部分内核中可能是内建能力，不一定存在独立 .ko 模块。
   virtio
   virtio_pci
   virtio_ring
@@ -42,44 +43,50 @@ PREFERRED_DRIVERS=(
   vmw_pvscsi
 )
 
-module_available() {
-  local module="$1"
+DRIVER_TEXT=""
+DRIVER_SKIPPED_TEXT=""
 
-  modinfo "$module" >/dev/null 2>&1
+module_available_for_kernel() {
+  local kver="$1"
+  local module="$2"
+
+  # 必须按目标内核版本判断。不能用当前运行内核的 modinfo 结果去重建其他内核，
+  # 否则老内核可能因为找不到某个模块，例如 virtio.ko，而导致 dracut-install 失败。
+  modinfo -k "$kver" "$module" >/dev/null 2>&1
 }
 
-build_driver_list() {
+build_driver_list_for_kernel() {
+  local kver="$1"
   local module
   local drivers=()
   local skipped=()
 
   for module in "${PREFERRED_DRIVERS[@]}"; do
-    if module_available "$module"; then
+    if module_available_for_kernel "$kver" "$module"; then
       drivers+=("$module")
     else
       skipped+=("$module")
     fi
   done
 
-  if [ "${#skipped[@]}" -gt 0 ]; then
-    log_warn "以下模块当前系统未发现，dracut 配置中不强制写入：${skipped[*]}"
-    log_warn "如果这些模块是内核内建模块，未写入 initramfs 属于正常现象"
-  fi
-
-  printf '%s\n' "${drivers[*]}"
+  DRIVER_TEXT="${drivers[*]}"
+  DRIVER_SKIPPED_TEXT="${skipped[*]}"
 }
 
 write_dracut_config() {
-  local driver_text="$1"
-
   log_info "写入 dracut 通用 initramfs 配置"
-  write_file_if_changed "$DRACUT_CONF" <<EOF
+  write_file_if_changed "$DRACUT_CONF" <<'EOF'
 # VMware 迁移到 H3C/KVM 云平台使用。
 # hostonly=no 表示生成通用 initramfs，不只适配当前 VMware 虚拟硬件。
+#
+# 不在此文件中写死 add_drivers：
+# 1. 不同内核版本的模块集合可能不同；
+# 2. 部分驱动可能是内核内建能力，不存在独立 .ko 文件；
+# 3. 写死不存在的模块会导致 dracut-install 失败。
+#
+# 本脚本会在重建每个 /boot/vmlinuz-* 对应 initramfs 时，
+# 按目标内核版本单独过滤可用模块，并通过 dracut --add-drivers 传入。
 hostonly="no"
-
-# 只写当前系统实际存在的模块；内建模块不需要写入 initramfs。
-add_drivers+=" ${driver_text} "
 EOF
 }
 
@@ -119,21 +126,30 @@ rebuild_one_initramfs() {
   local kver="$1"
   local image="/boot/initramfs-${kver}.img"
 
+  build_driver_list_for_kernel "$kver"
+
+  if [ -n "$DRIVER_SKIPPED_TEXT" ]; then
+    log_warn "内核 $kver 未发现以下模块，不会强制加入：$DRIVER_SKIPPED_TEXT"
+    log_warn "如果这些模块是内核内建模块，未写入 initramfs 属于正常现象"
+  fi
+
   log_info "重建 initramfs：$image"
   log_info "内核版本：$kver"
-  log_info "本次 dracut 显式加入驱动：$DRIVER_TEXT"
-  dracut -f --add-drivers "$DRIVER_TEXT" "$image" "$kver"
+
+  if [ -n "$DRIVER_TEXT" ]; then
+    log_info "本次 dracut 显式加入驱动：$DRIVER_TEXT"
+    dracut -f --add-drivers "$DRIVER_TEXT" "$image" "$kver"
+  else
+    log_warn "内核 $kver 未发现任何目标模块，仅使用 hostonly=no 重建 initramfs"
+    dracut -f "$image" "$kver"
+  fi
 }
 
 rebuild_initramfs() {
-  local driver_text="$1"
-
   require_cmd dracut
 
   # 不能只用 uname -r。01-install-base.sh 可能升级并安装新内核，
   # 但重启前 uname -r 仍然是旧内核；这里只重建当前内核会导致新内核的 initramfs 缺驱动。
-  DRIVER_TEXT="$driver_text"
-  export DRIVER_TEXT
   for_each_boot_kernel rebuild_one_initramfs
 }
 
@@ -165,15 +181,11 @@ verify_initramfs() {
 }
 
 main() {
-  local drivers
-
   require_root
   require_cmd modinfo
   print_os_info
-  drivers="$(build_driver_list)"
-  [ -n "$drivers" ] || die "当前系统没有发现可写入 initramfs 的目标模块"
-  write_dracut_config "$drivers"
-  rebuild_initramfs "$drivers"
+  write_dracut_config
+  rebuild_initramfs
   verify_initramfs
   refresh_grub
   log_info "03 完成：请现在执行 sudo reboot，重启成功后再执行 scripts/04-clean-old-kernels.sh"
